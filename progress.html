@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сводка преподавателя · Практикум ОП01</title>
+<link rel="stylesheet" href="/style.css">
+<header><strong>Практикум ОП01</strong><a class="header-link" href="/">К занятиям</a></header>
+<main class="teacher-view">
+  <h1>Сводка преподавателя</h1>
+  <div class="actions">
+    <label for="name">Профиль</label>
+    <select id="name"><option value="">Все профили</option></select>
+    <button id="refresh" type="button">Обновить</button>
+    <a class="header-link" href="/progress.csv" download>Скачать CSV</a>
+  </div>
+  <p id="summary-status" role="status">Загружаем результаты…</p>
+  <div class="table-scroll">
+    <table id="progress-table" hidden>
+      <thead><tr><th scope="col">Профиль</th><th scope="col">Работа</th><th scope="col">Статус</th>
+        <th scope="col">Критерии</th><th scope="col">Попытки</th></tr></thead>
+      <tbody id="summary-rows"></tbody>
+    </table>
+  </div>
+</main>
+<script type="module" src="/progress.js"></script>
+</html>

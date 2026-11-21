@@ -1,0 +1,10 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+https://{$OP01_CLASSROOM_HOST} {
+	bind {$OP01_BIND_ADDRESS:127.0.0.1}
+	tls "{$OP01_TLS_CERT}" "{$OP01_TLS_KEY}"
+	reverse_proxy 127.0.0.1:{$OP01_APP_PORT:8174}
+}

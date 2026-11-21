@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Практикум ОП01</title>
+<link rel="stylesheet" href="/style.css">
+<header>
+  <strong>Практикум ОП01</strong>
+  <div class="header-actions">
+    <form id="profile-form" hidden><label for="profile">Учебный профиль</label><input id="profile" maxlength="48" required><button>Открыть</button></form>
+    <div id="session-controls" class="actions" hidden><span id="session-name"></span><button id="logout" type="button">Выйти</button></div>
+    <a id="teacher-link" class="header-link" href="/progress" hidden>Сводка преподавателя</a>
+  </div>
+</header>
+<section id="sign-in" hidden aria-labelledby="sign-in-title">
+  <h1 id="sign-in-title">Вход в практикум</h1>
+  <form id="login-form">
+    <label>Имя<input id="login" autocomplete="username" maxlength="48" required></label>
+    <label>Пароль<input id="password" type="password" autocomplete="current-password" maxlength="200" required></label>
+    <button>Войти</button>
+  </form>
+</section>
+<main id="practice" hidden>
+  <aside><h2>Содержание</h2><p id="total"></p><nav id="catalog" aria-label="Практические занятия"></nav></aside>
+  <section id="lesson" aria-labelledby="lesson-title">
+    <p id="meta"></p><h1 id="lesson-title"></h1>
+    <p id="availability"></p>
+    <details id="steps-panel" open><summary>Что нужно сделать</summary><ol id="steps"></ol></details>
+    <div id="workspace" hidden>
+      <form id="wizard-form" hidden>
+        <p id="wizard-step"></p>
+        <h2 id="wizard-title">Учебный установщик Debian</h2>
+        <div class="fields" id="wizard-fields"></div>
+        <div class="actions"><button id="wizard-apply" disabled>Продолжить</button><span id="wizard-status" role="status"></span></div>
+      </form>
+      <div class="terminal">
+        <h2>Учебная машина</h2>
+        <pre id="output" tabindex="0" role="log">Введите help, чтобы увидеть команды.</pre>
+        <form id="command-form"><label for="command">student@lab$</label><input id="command" aria-label="Команда" maxlength="160" autocomplete="off" spellcheck="false"><button>Выполнить</button></form>
+      </div>
+      <form id="editor-form" hidden>
+        <h2 id="editor-path"></h2>
+        <textarea id="editor-text" aria-label="Текст документа" rows="6" maxlength="4096" disabled></textarea>
+        <div class="actions"><button id="editor-save" disabled>Сохранить файл</button><span role="status" id="editor-status"></span></div>
+      </form>
+      <form id="answers">
+        <h2 id="answer-title"></h2>
+        <p id="answer-prompt"></p>
+        <div class="fields" id="answer-fields"></div>
+        <div class="actions"><button type="submit">Проверить работу</button><button type="button" id="draft">Сохранить черновик</button><span role="status" id="save-status"></span></div>
+        <ul id="results" aria-live="polite"></ul>
+      </form>
+    </div>
+  </section>
+</main>
+<p id="error" role="alert"></p>
+<script type="module" src="/app.js"></script>
+</html>
