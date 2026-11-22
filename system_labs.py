@@ -64,7 +64,7 @@ INDEX = "lab-indexer.service"
 PERFORMANCE_COMMANDS = (
     "systemctl list-unit-files --state=enabled", f"sudo systemctl disable {INDEX}",
     f"sudo systemctl enable {INDEX}", f"du -sh {CACHE}", "df -h /",
-    f"rm -- {CACHE}/index.tmp", "lsblk -d -o NAME,ROTA", "lab-reset",
+    f"rm -- {CACHE}/index.tmp", "lsblk -d -o NAME,ROTA", "lsblk -D", "sudo fstrim -n -v /", "lab-reset",
 )
 
 
@@ -102,6 +102,13 @@ def performance(command, state):
     if command == "lsblk -d -o NAME,ROTA":
         state["disk_type_seen"] = True
         return "NAME ROTA\nsda     0"
+    if command in ("lsblk -D", "lsblk --discard"):
+        state["discard_seen"] = True
+        return "NAME  DISC-ALN DISC-GRAN DISC-MAX DISC-ZERO\nsda          0        4K       2G         0\n└─sda1       0        4K       2G         0"
+    if command in ("sudo fstrim -n -v /", "sudo fstrim --dry-run --verbose /"):
+        if state.get("disk_type_seen") and state.get("discard_seen"):
+            state["trim_previewed"] = True
+        return "/: пробный запуск TRIM. Свободные блоки не изменены."
     return None
 
 
@@ -110,6 +117,7 @@ def performance_checks(state):
         "autostart_checked": state.get("startup_before") and state.get("startup_verified"),
         "autostart_disabled": state.get("enabled") is False,
         "cache_cleaned": state.get("cache_seen") and state.get("cleaned"),
+        "trim_previewed": state.get("trim_previewed"),
     }
 
 

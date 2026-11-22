@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from classroom import read_roster, valid_profile
+from custom_tasks import load_task, save_task, stored_tasks, validate_task
 from labs import LABS
 from storage import Postgres, connect, execute, initialize, lock_lesson
 
@@ -20,6 +21,7 @@ def read_snapshot(path, selected=None, renamed=None):
         tables = {row["name"] for row in source.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if "progress" not in tables:
             raise ValueError("В файле отсутствует таблица прогресса ОП01.")
+        custom = {entry["task"]["id"]: entry["task"] for entry in stored_tasks(source)} if "custom_tasks" in tables else {}
         for table in ("progress", "machines"):
             if table not in tables:
                 continue
@@ -27,7 +29,7 @@ def read_snapshot(path, selected=None, renamed=None):
                 profile, lesson = row["profile"], row["lesson"]
                 if selected is not None and profile != selected:
                     continue
-                if not valid_profile(profile) or lesson not in LABS:
+                if not valid_profile(profile) or (lesson not in LABS and lesson not in custom):
                     ignored.add((profile, lesson))
                     continue
                 if table == "machines":
@@ -46,7 +48,8 @@ def read_snapshot(path, selected=None, renamed=None):
                                 or type(item.get("passed")) is not bool for item in results)))):
                         raise ValueError("Некорректная запись прогресса.")
                 pairs.setdefault((renamed or profile, lesson), {})[table] = dict(row)
-    return pairs, len(ignored)
+    used_tasks = {lesson: validate_task(custom[lesson]) for _, lesson in pairs if lesson in custom}
+    return pairs, used_tasks, len(ignored)
 
 
 def existing_keys(db):
@@ -57,9 +60,22 @@ def existing_keys(db):
     return keys
 
 
-def import_progress(target, pairs, *, apply=False):
+def check_tasks(db, tasks, *, apply=False):
+    if not tasks or execute(db, "SELECT to_regclass('custom_tasks') AS relation").fetchone()["relation"] is None:
+        return
+    for task_id, task in sorted(tasks.items()):
+        if apply:
+            save_task(db, task, 0)
+        else:
+            existing = load_task(db, task_id)
+            if existing and existing["task"] != task:
+                raise ValueError(f"В PostgreSQL уже есть другая версия задания {task_id}.")
+
+
+def import_progress(target, pairs, tasks, *, apply=False):
     if not apply:
         with closing(connect(target)) as db:
+            check_tasks(db, tasks)
             conflicts = pairs.keys() & existing_keys(db)
         return len(pairs) - len(conflicts), len(conflicts)
     if not pairs:
@@ -67,6 +83,7 @@ def import_progress(target, pairs, *, apply=False):
     initialize(target)
     imported = skipped = 0
     with closing(connect(target)) as db, db:
+        check_tasks(db, tasks, apply=True)
         for (profile, lesson), rows in sorted(pairs.items()):
             lock_lesson(db, profile, lesson)
             existing = execute(db, """
@@ -105,7 +122,7 @@ def main():
     if not dsn:
         parser.error("Укажите OP01_POSTGRES_DSN для нужной базы.")
     try:
-        pairs, ignored = read_snapshot(args.source, args.profile, args.login)
+        pairs, tasks, ignored = read_snapshot(args.source, args.profile, args.login)
         if args.profile is not None and not pairs:
             parser.error("У выбранного локального профиля нет результатов и сохранённого состояния.")
         if args.roster:
@@ -114,7 +131,7 @@ def main():
             if unknown:
                 parser.error("Профили отсутствуют в списке учеников: " + ", ".join(sorted(unknown))
                              + ". Укажите соответствие через --profile и --login.")
-        imported, skipped = import_progress(Postgres(dsn), pairs, apply=args.apply)
+        imported, skipped = import_progress(Postgres(dsn), pairs, tasks, apply=args.apply)
     except (ValueError, OSError, RuntimeError, sqlite3.Error) as error:
         parser.error(str(error))
     print(f"{'Перенесено' if args.apply else 'Новых'}: {imported}. "

@@ -11,7 +11,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from classroom import Classroom, account, read_roster, write_roster
-from server import COURSE, LABS, WINDOWS_LATER, ClassroomHTTPServer, Handler, connect, initialize
+from server import COURSE, LABS, WINDOWS_LATER, ClassroomHTTPServer, Handler, initialize
+from storage import connect
 
 
 class ProgressTests(unittest.TestCase):
@@ -110,6 +111,69 @@ class ProgressTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=len(roster)) as pool:
             identities = list(pool.map(sign_in, roster))
         self.assertEqual([item["profile"] for item in identities], list(roster))
+
+    def test_custom_task_is_private_to_edit_and_uses_independent_progress(self):
+        password = secrets.token_urlsafe()
+        self.server.classroom = Classroom({"student": account(password, "student"), "teacher": account(password, "teacher")})
+        base = f"http://127.0.0.1:{self.server.server_port}"
+
+        def call(path, payload=None, cookie=None):
+            headers = {"Content-Type": "application/json"}
+            if cookie:
+                headers["Cookie"] = cookie
+            data = json.dumps(payload).encode() if payload is not None else None
+            with urlopen(Request(base + path, data, headers), timeout=5) as response:
+                return json.load(response), response.headers.get("Set-Cookie", "").split(";")[0]
+
+        student = call("/api/login", {"login": "student", "password": password})[1]
+        teacher = call("/api/login", {"login": "teacher", "password": password})[1]
+        task = {"version": 1, "id": "custom-service-check", "title": "Проверка службы", "hours": 2,
+                "template": "incident-diagnostics", "steps": ["Воспроизведите отказ."],
+                "checks": ["state:reproduced"],
+                "questions": [{"id": "code", "label": "Контрольный код", "answer": "secret-answer"}]}
+        with self.assertRaises(HTTPError) as failure:
+            call("/api/tasks", {"task": task}, student)
+        self.assertEqual(failure.exception.code, 403)
+        with self.assertRaises(HTTPError) as failure:
+            call("/api/tasks", cookie=student)
+        self.assertEqual(failure.exception.code, 403)
+
+        saved = call("/api/tasks", {"task": task}, teacher)[0]
+        self.assertEqual(saved, {"task": task, "revision": 1})
+        self.assertEqual(call("/api/tasks", {"task": task}, teacher)[0], saved)
+        custom = task["id"]
+        course = call("/api/course", cookie=student)[0]
+        self.assertEqual(course["course"]["sections"][-1]["lessons"][0]["id"], custom)
+        self.assertNotIn("secret-answer", json.dumps(course))
+        self.assertIn("Connection refused", call("/api/terminal", {
+            "lesson": custom, "command": "curl -I http://127.0.0.1:8080/health"
+        }, student)[0]["output"])
+        result = call("/api/check", {"lesson": custom, "answers": {"question-code": "Secret-answer"}}, student)[0]
+        self.assertTrue(all(item["passed"] for item in result["results"]))
+        report = call("/api/summary", cookie=teacher)[0]["profiles"][0]["work"]
+        self.assertNotIn("incident-diagnostics", report)
+        self.assertEqual(report[custom]["status"], "passed")
+        edited = {**task, "title": "Новая формулировка"}
+        with self.assertRaises(HTTPError) as failure:
+            call("/api/tasks", {"task": edited}, teacher)
+        self.assertEqual(failure.exception.code, 409)
+        self.assertEqual(call("/api/tasks", {"task": edited, "revision": 1}, teacher)[0]["revision"], 2)
+        self.stop_server()
+        self.start_server()
+        self.assertEqual(self.request("/api/tasks")["tasks"][0]["task"], edited)
+        self.assertEqual(self.request("/api/progress?profile=student")[custom]["attempts"], 1)
+
+    def test_storage_failure_returns_retryable_error_without_counting_an_attempt(self):
+        self.server.database = self.database.parent / "unavailable" / "progress.sqlite3"
+        payload = {"profile": "student-a", "lesson": "machine-inventory", "answers": {"ram": "16"}}
+        with self.assertRaises(HTTPError) as failure:
+            self.request("/api/check", payload)
+        with failure.exception as response:
+            self.assertEqual(response.code, 503)
+            self.assertIn("временно недоступно", json.load(response)["error"])
+        self.server.database = self.database
+        result = self.request("/api/check", payload)
+        self.assertEqual(result["attempts"], 1)
 
     def test_teacher_summary_combines_drafts_machine_activity_and_checks(self):
         self.assertEqual(self.request("/api/summary")["profiles"], [])
@@ -211,11 +275,19 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("0", command(f"sudo -u editor test -w {path}"))
         self.assertIn("0", command(f"sudo -u reader test -r {path}"))
         self.assertIn("1", command(f"sudo -u reader test -w {path}"))
+        self.assertIn("No space left", command(f"cp {path} /mnt/media/report.txt"))
+        self.assertIn("preview.cache", command("du -ah --max-depth=1 /mnt/media"))
+        command("rm -- /mnt/media/preview.cache")
+        self.assertIn("75%", command("df -h /mnt/media"))
+        command(f"cp {path} /mnt/media/report.txt")
+        self.assertFalse(self.request("/api/check", answers)["results"][-1]["passed"])
+        self.assertIn("0", command(f"cmp {path} /mnt/media/report.txt"))
         result = self.request("/api/check", answers)
         self.assertTrue(all(item["passed"] for item in result["results"]))
         command(f"sudo setfacl -m u:reader:rw {path}")
         after_change = self.request("/api/check", answers)
-        self.assertFalse(after_change["results"][-1]["passed"])
+        self.assertFalse(after_change["results"][-2]["passed"])
+        self.assertTrue(after_change["results"][-1]["passed"])
 
     def test_accounts_require_access_tests_and_group_check_after_removal(self):
         request = {"lesson": "accounts-and-permissions", "profile": "student-a"}
@@ -321,6 +393,10 @@ class ProgressTests(unittest.TestCase):
         command("rm -- /var/tmp/op01-cache/index.tmp")
         self.assertIn("6G", command("df -h /"))
         self.assertIn("ROTA", command("lsblk -d -o NAME,ROTA"))
+        command("sudo fstrim -n -v /")
+        self.assertIn("DISC-MAX", command("lsblk -D"))
+        self.assertFalse(self.request("/api/check", answers)["results"][-1]["passed"])
+        self.assertIn("не изменены", command("sudo fstrim --dry-run --verbose /"))
         result = self.request("/api/check", answers)
         self.assertTrue(all(item["passed"] for item in result["results"]))
         command("sudo systemctl enable lab-indexer.service")

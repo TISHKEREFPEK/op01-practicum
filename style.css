@@ -19,7 +19,8 @@ main { display: grid; grid-template-columns: minmax(235px, 310px) minmax(0, 1fr)
 aside { background: #eaeaf0; padding: 22px 16px; }
 h1 { font-size: clamp(25px, 3vw, 40px); line-height: 1.12; margin: 10px 0 14px; }
 h2 { font-size: 18px; margin: 0 0 8px; }
-h3 { font-size: 13px; margin: 22px 0 8px; color: #555560; }
+nav h3 { font-size: 14px; margin: 18px 0 5px; }
+nav h4 { font-size: 13px; margin: 10px 8px 4px; color: #555560; }
 p { line-height: 1.5; }
 #total, #meta, #availability { color: #63636e; margin: 0 0 12px; }
 nav { display: grid; gap: 4px; }
@@ -27,6 +28,11 @@ nav a { display: grid; gap: 4px; padding: 9px; border-radius: 7px; color: inheri
 nav a:hover, nav a[aria-current=true] { background: #dadae3; }
 nav small { color: #555560; }
 #lesson { padding: clamp(16px, 4vw, 40px); }
+#practice { overflow: clip; }
+#practice aside { min-width: 0; }
+.practice-navigation { position: sticky; top: 12px; }
+#catalog { max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); overflow: auto; padding: 3px; overscroll-behavior: contain; }
+nav a, #lesson h1, #steps { overflow-wrap: anywhere; }
 summary { font-weight: 600; cursor: pointer; }
 ol { padding-left: 22px; }
 li { margin: 6px 0; line-height: 1.4; }
@@ -50,13 +56,38 @@ li { margin: 6px 0; line-height: 1.4; }
 .failed, #error { color: #85474f; }
 #error { margin: 12px 4vw; }
 .teacher-view { display: block; padding: clamp(16px, 4vw, 40px); }
+.teacher-view select { max-width: min(100%, 310px); }
 .table-scroll { overflow-x: auto; }
 .teacher-view table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
 .teacher-view th, .teacher-view td { padding: 10px; border-bottom: 1px solid #d9d9e1; }
 .teacher-view th { background: #eaeaf0; }
 .teacher-view td.passed { font-weight: 600; }
+.task-workspace { min-width: 0; padding: clamp(16px, 4vw, 40px); }
+.tasks-actions { margin: 14px 0; }
+#saved-tasks { list-style: none; padding: 0; }
+#saved-tasks button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+#saved-tasks button[aria-current] { background: #dadae3; border-color: #adadba; }
+.task-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.task-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(20px, 3vw, 36px); }
+.task-columns section > label, .task-question > label { display: grid; gap: 5px; margin: 12px 0; }
+.task-columns input:not([type=checkbox]), .task-columns select, .task-columns textarea { width: 100%; min-width: 0; }
+.task-columns textarea { padding: 9px; resize: vertical; font: inherit; color: inherit; border: 1px solid #adadba; border-radius: 7px; background: #fcfcfd; }
+.task-hint, #tasks-empty { font-size: 14px; color: #555560; }
+.task-checks { min-width: 0; margin: 12px 0; padding: 12px; border: 1px solid #d9d9e1; border-radius: 7px; }
+.task-checks legend { padding: 0 5px; }
+#task-checks label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; margin: 7px 0; }
+#task-checks input { margin-top: 3px; accent-color: #405747; }
+.task-question { margin: 0 0 12px; padding-bottom: 12px; border-bottom: 1px solid #d9d9e1; }
+.task-footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid #d9d9e1; }
+#task-status, .task-notice { color: #405747; }
+#task-status.failed, .task-notice.failed { color: #85474f; }
+#task-status:empty, .task-notice:empty { margin: 0; }
+.task-notice { flex-basis: 100%; margin: 3px 0 0; }
+.task-notice:empty { flex-basis: 0; }
+@media (max-width: 1000px) { .task-columns { grid-template-columns: 1fr; } }
 @media (max-width: 720px) {
   main { grid-template-columns: 1fr; }
-  nav { max-height: 245px; overflow: auto; }
+  .practice-navigation { position: static; }
+  #catalog { max-height: 245px; }
   .fields { grid-template-columns: 1fr; }
 }

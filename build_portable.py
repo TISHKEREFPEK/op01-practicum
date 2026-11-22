@@ -13,9 +13,9 @@ RUNTIME_URL = "https://www.python.org/ftp/python/3.14.9/python-3.14.9-embed-amd6
 RUNTIME_SHA256 = "3c01d7cfc666f746a6f064f60fb2156ab0ec464d3d738ab796371a46a9bb24a2"
 SOURCE_FILES = (
     "Start.cmd", "README.md", "course.json", "index.html", "app.js", "style.css",
-    "progress.html", "progress.js", "server.py", "storage.py", "reports.py", "classroom.py", "roster.py",
-    "requirements-postgres.txt", "migrate_progress.py", "Caddyfile.example",
-    "labs.py", "linux_sim.py", "system_labs.py", "archive_labs.py", "installer_lab.py", "bash_lab.py",
+    "progress.html", "progress.js", "tasks.html", "tasks.js", "server.py", "storage.py", "reports.py", "classroom.py", "roster.py",
+    "requirements-postgres.txt", "migrate_progress.py", "Caddyfile.example", "example-task.json",
+    "labs.py", "custom_tasks.py", "linux_sim.py", "system_labs.py", "archive_labs.py", "installer_lab.py", "bash_lab.py",
 )
 START_TEXT = """Практикум ОП01 для Windows x64
 

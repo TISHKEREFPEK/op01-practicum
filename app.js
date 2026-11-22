@@ -2,12 +2,16 @@ const byId = id => document.getElementById(id);
 const answers = byId("answers");
 const wizardForm = byId("wizard-form");
 const editor = byId("editor-text");
+const commandInput = byId("command");
 const profileInput = byId("profile");
 const errorLine = byId("error");
 let model, current, profile, progress = {};
 let busy = false;
 let classroomMode = false;
 const transcripts = new Map();
+const commandHistory = new Map();
+let historyIndex = null;
+let pendingCommand = "";
 const drafts = new Map();
 const documentDrafts = new Map();
 const lessonLinks = new Map();
@@ -45,8 +49,10 @@ function catalog() {
   if (!lessonLinks.size) {
     let number = 0;
     for (const section of model.course.sections) {
-      add(nav, "h3", section.title);
+      add(nav, "h3", section.semester ? `${section.semester}-й семестр · ${section.title}` : section.title);
+      const topics = new Map(section.topics.map(({firstLesson, title}) => [firstLesson, title]));
       for (const lesson of section.lessons) {
+        if (topics.has(lesson.id)) add(nav, "h4", topics.get(lesson.id));
         const link = add(nav, "a", "");
         link.href = `#${lesson.id}`;
         add(link, "span", `${++number}. ${lesson.title}`);
@@ -93,6 +99,7 @@ function answerFields(lab, saved) {
 }
 
 function render() {
+  localStorage.setItem(lastLessonKey(), current.id);
   catalog();
   byId("meta").textContent = `${current.hours} ак. ч.  /  ${state(current)}`;
   byId("lesson-title").textContent = current.title;
@@ -112,7 +119,8 @@ function render() {
     const output = byId("output");
     output.textContent = transcripts.get(current.id) ?? initialOutput;
     output.scrollTop = output.scrollHeight;
-    byId("command").value = "";
+    commandInput.value = "";
+    historyIndex = null;
     byId("save-status").textContent = "";
     report(record);
     if (lab.editor) loadDocument(lab.editor);
@@ -182,24 +190,30 @@ async function loadDocument(path) {
   }
 }
 
-function lessonFromHash() {
+function lastLessonKey() {
+  return `op01-last-lesson:${classroomMode ? "classroom" : "local"}:${profile}`;
+}
+
+function findLesson(id, fallback = "") {
   const lessons = model.course.sections.flatMap(section => section.lessons);
-  return lessons.find(lesson => "#" + lesson.id === location.hash) ?? lessons[0];
+  return lessons.find(lesson => lesson.id === id) ?? lessons.find(lesson => lesson.id === fallback) ?? lessons[0];
 }
 
 addEventListener("hashchange", () => {
   if (profile && !busy) syncLesson();
 });
 
-async function openProfile(name) {
+async function openProfile(name, lessonId = location.hash.slice(1)) {
   progress = await request("/api/progress?profile=" + encodeURIComponent(name));
   if (profile !== name) {
     transcripts.clear();
+    commandHistory.clear();
     drafts.clear();
     documentDrafts.clear();
   }
   profile = name;
-  current = lessonFromHash();
+  current = findLesson(lessonId, localStorage.getItem(lastLessonKey()));
+  history.replaceState(null, "", `#${current.id}`);
   profileInput.value = name;
   if (!classroomMode) localStorage.setItem("op01-profile", name);
   render();
@@ -219,7 +233,7 @@ async function save(mode) {
     report(progress[current.id]);
     catalog();
   } catch (error) {
-    errorLine.textContent = error.message;
+    byId("save-status").textContent = error.message;
   } finally {
     busy = false;
     syncLesson();
@@ -227,10 +241,11 @@ async function save(mode) {
 }
 
 function syncLesson() {
-  const next = lessonFromHash();
+  const next = findLesson(location.hash.slice(1));
   if (next.id !== current.id) {
     current = next;
     render();
+    if (matchMedia("(min-width: 721px)").matches) window.scrollTo(0, 0);
   }
 }
 
@@ -239,9 +254,11 @@ function signedOut() {
   progress = {};
   drafts.clear();
   transcripts.clear();
+  commandHistory.clear();
   documentDrafts.clear();
   byId("session-controls").hidden = true;
   byId("teacher-link").hidden = true;
+  byId("tasks-link").hidden = true;
   byId("practice").hidden = true;
   byId("sign-in").hidden = false;
 }
@@ -252,6 +269,7 @@ async function signedIn(identity) {
   byId("session-controls").hidden = false;
   byId("session-name").textContent = identity.profile;
   byId("teacher-link").hidden = !identity.teacher;
+  byId("tasks-link").hidden = !identity.teacher;
   byId("practice").hidden = false;
 }
 
@@ -278,6 +296,7 @@ byId("logout").onclick = async () => {
   try {
     await request("/api/logout", {});
     signedOut();
+    history.replaceState(null, "", location.pathname + location.search);
     errorLine.textContent = "";
   } catch (error) {
     errorLine.textContent = error.message;
@@ -304,7 +323,8 @@ byId("profile-form").onsubmit = async event => {
   if (busy || !model || !current) return;
   busy = true;
   try {
-    await openProfile(profileInput.value.trim());
+    const name = profileInput.value.trim();
+    await openProfile(name, name === profile ? current.id : "");
     errorLine.textContent = "";
   } catch (error) {
     errorLine.textContent = error.message;
@@ -373,20 +393,46 @@ wizardForm.onsubmit = event => {
   sendCommand(["installer", wizardForm.dataset.stage, ...values].join(" "), false);
 };
 
+commandInput.onkeydown = event => {
+  if ((event.key !== "ArrowUp" && event.key !== "ArrowDown") || event.isComposing ||
+      event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const history = commandHistory.get(current?.id);
+  if (!history?.length) return;
+  event.preventDefault();
+  if (historyIndex === null) {
+    if (event.key === "ArrowDown") return;
+    pendingCommand = commandInput.value;
+    historyIndex = history.length;
+  }
+  const offset = event.key === "ArrowUp" ? -1 : 1;
+  historyIndex = Math.max(0, historyIndex + offset);
+  if (historyIndex === history.length) {
+    commandInput.value = pendingCommand;
+    historyIndex = null;
+    return;
+  }
+  commandInput.value = history[historyIndex];
+};
+
 byId("command-form").onsubmit = event => {
   event.preventDefault();
   if (busy || !profile) return;
-  const input = byId("command");
-  const command = input.value.trim();
+  const command = commandInput.value.trim();
   if (!command) return;
-  input.value = "";
+  const history = commandHistory.get(current.id) ?? [];
+  if (history.at(-1) !== command) {
+    history.push(command);
+    if (history.length > 50) history.shift();
+    commandHistory.set(current.id, history);
+  }
+  commandInput.value = "";
+  historyIndex = null;
   sendCommand(command, true);
 };
 
 try {
   const [catalogue, session] = await Promise.all([request("/api/course"), request("/api/session")]);
   model = catalogue;
-  current = lessonFromHash();
   classroomMode = session.classroom;
   if (classroomMode) {
     if (session.identity) await signedIn(session.identity);
@@ -395,6 +441,7 @@ try {
     await openProfile(localStorage.getItem("op01-profile") || "Ученик");
     byId("profile-form").hidden = false;
     byId("teacher-link").hidden = false;
+    byId("tasks-link").hidden = false;
     byId("practice").hidden = false;
   }
 } catch (error) {

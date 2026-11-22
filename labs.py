@@ -21,11 +21,14 @@ HARDWARE_COMMANDS = (
     "cat /proc/interrupts", "ping -c 3 192.168.10.1", "lab-reset",
 )
 SHARE_FILE = "/srv/course/report.txt"
+MEDIA_CACHE = "/mnt/media/preview.cache"
+MEDIA_REPORT = "/mnt/media/report.txt"
 SHARE_COMMANDS = (
     "lsblk", "df -h /mnt/media", f"getfacl {SHARE_FILE}",
     f"sudo setfacl -m u:editor:rw,u:reader:r {SHARE_FILE}",
     f"sudo -u editor test -w {SHARE_FILE}", f"sudo -u reader test -r {SHARE_FILE}",
-    f"sudo -u reader test -w {SHARE_FILE}", "lab-reset",
+    f"sudo -u reader test -w {SHARE_FILE}", "du -ah --max-depth=1 /mnt/media",
+    f"rm -- {MEDIA_CACHE}", f"cp {SHARE_FILE} {MEDIA_REPORT}", f"cmp {SHARE_FILE} {MEDIA_REPORT}", "lab-reset",
 )
 
 
@@ -79,6 +82,7 @@ def hardware(command, state):
 
 def resource_sharing(command, state):
     permissions = state.get("permissions", {})
+    cleared = state.get("media_cache_removed", False)
     if command == "lab-reset":
         state.clear()
         return "Учебные устройства и права возвращены к исходному состоянию."
@@ -86,8 +90,31 @@ def resource_sharing(command, state):
         state["devices_read"] = True
         return "NAME   SIZE TYPE MOUNTPOINTS\nsda    64G  disk\n└─sda1 64G  part /\nsdb     8G  disk /mnt/media"
     if command == "df -h /mnt/media":
-        state["usage_read"] = True
-        return "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sdb        8.0G  8.0G    0B 100% /mnt/media"
+        state["media_space_seen" if cleared else "usage_read"] = True
+        usage = "6.0G  2.0G  75%" if cleared else "8.0G    0B 100%"
+        return f"Filesystem      Size  Used Avail Use% Mounted on\n/dev/sdb        8.0G  {usage} /mnt/media"
+    if command == "du -ah --max-depth=1 /mnt/media":
+        if cleared:
+            report = f"4.0K    {MEDIA_REPORT}\n" if state.get("media_report_copied") else ""
+            return f"6.0G    /mnt/media/materials\n{report}6.0G    /mnt/media"
+        state["media_cache_seen"] = True
+        return f"6.0G    /mnt/media/materials\n2.0G    {MEDIA_CACHE}\n8.0G    /mnt/media"
+    if command in (f"rm -- {MEDIA_CACHE}", f"rm {MEDIA_CACHE}"):
+        if cleared:
+            return f"rm: {MEDIA_CACHE}: No such file or directory"
+        state["media_cache_removed"] = True
+        return ""
+    if command == f"cp {SHARE_FILE} {MEDIA_REPORT}":
+        if not cleared:
+            return f"cp: {MEDIA_REPORT}: No space left on device"
+        state["media_report_copied"] = True
+        state.pop("media_verified", None)
+        return ""
+    if command == f"cmp {SHARE_FILE} {MEDIA_REPORT}":
+        if not state.get("media_report_copied"):
+            return f"cmp: {MEDIA_REPORT}: No such file or directory"
+        state["media_verified"] = all(state.get(marker) for marker in ("usage_read", "media_cache_seen", "media_space_seen"))
+        return "Код завершения: 0"
     args = command.split()
     if args == ["getfacl", SHARE_FILE]:
         entries = [f"user:{name}:{mode}" for name, mode in sorted(permissions.items())]
@@ -232,6 +259,7 @@ LABS = {
             "autostart_checked": "Список автозагрузки проверен до и после изменения",
             "autostart_disabled": "Автозапуск lab-indexer.service отключён",
             "cache_cleaned": "Измерен и очищен учебный кэш",
+            "trim_previewed": "Проверены тип диска и поддержка discard, выполнен пробный TRIM",
         },
     },
     "system-safety": {
@@ -346,20 +374,20 @@ LABS = {
             "editor_write": "Пользователь editor может писать",
             "reader_read": "Пользователь reader может читать",
             "reader_denied": "Попытка записи от reader отклонена",
+            "media_verified": "Освобождено место на накопителе, файл скопирован и сверен",
         },
     },
 }
 
 
-def run_command(lesson, command, state):
+def run_command(lab, command, state):
     if command == "help":
-        return "Команды учебной машины:\n" + "\n".join(LABS[lesson]["commands"])
-    output = LABS[lesson]["execute"](command, state)
+        return "Команды учебной машины:\n" + "\n".join(lab["commands"])
+    output = lab["execute"](command, state)
     return output if output is not None else "Команда недоступна в этой работе. Введите help."
 
 
-def check_answers(lesson, answers, state):
-    lab = LABS[lesson]
+def check_answers(lab, answers, state):
     results = []
     for key, definition in lab["fields"].items():
         answer = " ".join(answers.get(key, "").casefold().split())
@@ -375,7 +403,7 @@ def check_answers(lesson, answers, state):
     return results
 
 
-def public_labs():
+def public_labs(labs):
     return {
         identifier: {
             "title": lab["title"],
@@ -387,5 +415,5 @@ def public_labs():
                 for name, spec in lab["fields"].items()
             ],
         }
-        for identifier, lab in LABS.items()
+        for identifier, lab in labs.items()
     }

@@ -10,6 +10,7 @@
     <form id="profile-form" hidden><label for="profile">Учебный профиль</label><input id="profile" maxlength="48" required><button>Открыть</button></form>
     <div id="session-controls" class="actions" hidden><span id="session-name"></span><button id="logout" type="button">Выйти</button></div>
     <a id="teacher-link" class="header-link" href="/progress" hidden>Сводка преподавателя</a>
+    <a id="tasks-link" class="header-link" href="/tasks" hidden>Редактор заданий</a>
   </div>
 </header>
 <section id="sign-in" hidden aria-labelledby="sign-in-title">
@@ -21,7 +22,7 @@
   </form>
 </section>
 <main id="practice" hidden>
-  <aside><h2>Содержание</h2><p id="total"></p><nav id="catalog" aria-label="Практические занятия"></nav></aside>
+  <aside><div class="practice-navigation"><h2>Содержание</h2><p id="total"></p><nav id="catalog" aria-label="Практические занятия"></nav></div></aside>
   <section id="lesson" aria-labelledby="lesson-title">
     <p id="meta"></p><h1 id="lesson-title"></h1>
     <p id="availability"></p>

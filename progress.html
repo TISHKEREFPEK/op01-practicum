@@ -4,14 +4,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Сводка преподавателя · Практикум ОП01</title>
 <link rel="stylesheet" href="/style.css">
-<header><strong>Практикум ОП01</strong><a class="header-link" href="/">К занятиям</a></header>
+<header><strong>Практикум ОП01</strong><div class="header-actions"><a class="header-link" href="/tasks">Редактор заданий</a><a class="header-link" href="/">К занятиям</a></div></header>
 <main class="teacher-view">
   <h1>Сводка преподавателя</h1>
   <div class="actions">
-    <label for="name">Профиль</label>
-    <select id="name"><option value="">Все профили</option></select>
+    <label>Профиль <select id="name"><option value="">Все профили</option></select></label>
+    <label>Работа <select id="work"><option value="">Все работы</option></select></label>
+    <label>Статус
+      <select id="work-status">
+        <option value="">Все статусы</option>
+        <option value="new">Не начата</option>
+        <option value="started">В работе</option>
+        <option value="passed">Пройдена</option>
+      </select>
+    </label>
     <button id="refresh" type="button">Обновить</button>
-    <a class="header-link" href="/progress.csv" download>Скачать CSV</a>
+    <a class="header-link" href="/progress.csv" download>Скачать полную сводку CSV</a>
   </div>
   <p id="summary-status" role="status">Загружаем результаты…</p>
   <div class="table-scroll">

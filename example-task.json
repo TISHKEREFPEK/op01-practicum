@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": "custom-service-example",
+  "title": "Проверка учебной службы после сбоя",
+  "hours": 2,
+  "template": "incident-diagnostics",
+  "steps": [
+    "Проверьте адрес http://127.0.0.1:8080/health командой curl -I.",
+    "Прочитайте журнал команды journalctl для lab-report.service и запишите причину сбоя.",
+    "Исправьте PORT=abc на PORT=8080 в /etc/lab-report.conf, перезапустите службу и снова проверьте адрес.",
+    "Укажите протокол, по которому проверяли доступность службы. Введите help, если забыли синтаксис команды."
+  ],
+  "checks": ["field:cause", "state:reproduced", "state:edited", "state:active", "state:verified"],
+  "questions": [
+    {"id": "protocol", "label": "Какой протокол использован при проверке адреса?", "answer": "HTTP"}
+  ]
+}

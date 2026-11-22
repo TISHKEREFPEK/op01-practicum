@@ -1,6 +1,5 @@
 """Local OP01 classroom prototype."""
 import argparse
-from contextlib import closing
 import json
 import os
 import shlex
@@ -10,9 +9,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from classroom import Classroom, cookie_header, read_roster, token_from_cookie, valid_profile
+from custom_tasks import TaskConflict, available_checks, load_task, save_task, stored_tasks, task_lab, validate_task
 from labs import LABS, check_answers, public_labs, run_command
 from reports import export_csv, records, summary
-from storage import Postgres, connect, execute, initialize, lock_lesson
+from storage import Postgres, StorageUnavailable, execute, initialize, lock_lesson, request_database
 
 
 ROOT = Path(__file__).resolve().parent
@@ -28,7 +28,11 @@ FILES = {
     "/style.css": ("style.css", "text/css"),
     "/progress": ("progress.html", "text/html"),
     "/progress.js": ("progress.js", "text/javascript"),
+    "/tasks": ("tasks.html", "text/html"),
+    "/tasks.js": ("tasks.js", "text/javascript"),
+    "/tasks/example.json": ("example-task.json", "application/json"),
 }
+TASK_POSTS = {"/api/tasks", "/api/tasks/preview"}
 
 
 class ClassroomHTTPServer(ThreadingHTTPServer):
@@ -49,6 +53,14 @@ def save_machine_state(db, profile, lesson, state):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except StorageUnavailable as error:
+            self.close_connection = True
+            self.log_error("Storage request failed: %s", type(error.__cause__).__name__)
+            self.reply(503, {"error": "Хранилище прогресса временно недоступно. Повторите действие через несколько секунд."})
+
     @property
     def classroom(self):
         return getattr(self.server, "classroom", None)
@@ -58,6 +70,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def identity(self):
         return self.classroom.identity(self.token()) if self.classroom else None
+
+    def teacher_allowed(self):
+        if not self.classroom:
+            return True
+        identity = self.identity()
+        if identity and identity["teacher"]:
+            return True
+        self.reply(403, {"error": "Этот раздел доступен преподавателю."})
+        return False
 
     def profile_for_request(self, requested):
         if not self.classroom:
@@ -92,27 +113,38 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlsplit(self.path)
-        if self.classroom and url.path in ("/progress", "/api/summary", "/progress.csv"):
-            identity = self.identity()
-            if not identity or not identity["teacher"]:
-                self.reply(403, {"error": "Сводка доступна преподавателю."})
-                return
+        if url.path in ("/progress", "/api/summary", "/progress.csv", "/tasks", "/tasks/example.json", "/api/tasks") and not self.teacher_allowed():
+            return
         if url.path in FILES:
             file, mime = FILES[url.path]
             self.send_bytes(200, (ROOT / file).read_bytes(), mime)
         elif url.path == "/api/course":
-            self.reply(200, {"course": COURSE, "labs": public_labs(), "later": sorted(WINDOWS_LATER)})
+            with request_database(self.server.database) as db:
+                tasks = [entry["task"] for entry in stored_tasks(db)]
+            labs = {**LABS, **{task["id"]: task_lab(task) for task in tasks}}
+            sections = list(COURSE["sections"])
+            if tasks:
+                lessons = [{key: task[key] for key in ("id", "title", "steps", "hours")} for task in tasks]
+                sections.append({"id": "custom", "title": "Задания преподавателя", "topics": [], "lessons": lessons})
+            self.reply(200, {"course": {**COURSE, "sections": sections}, "labs": public_labs(labs), "later": sorted(WINDOWS_LATER)})
+        elif url.path == "/api/tasks":
+            with request_database(self.server.database) as db:
+                tasks = stored_tasks(db)
+            templates = [{"id": key, "title": title, "checks": available_checks(key)} for key, title in ACTIVE_LESSONS.items()]
+            self.reply(200, {"tasks": tasks, "templates": templates})
         elif url.path == "/api/session":
             self.reply(200, {"classroom": bool(self.classroom), "identity": self.identity()})
         elif url.path == "/api/progress":
             profile = self.profile_for_request(parse_qs(url.query).get("profile", [None])[0])
             if profile is None:
                 return
-            with closing(connect(self.server.database)) as db:
-                self.reply(200, records(db, profile))
+            with request_database(self.server.database) as db:
+                data = records(db, profile)
+            self.reply(200, data)
         elif url.path in ("/api/summary", "/progress.csv"):
-            with closing(connect(self.server.database)) as db:
-                data = summary(db, ACTIVE_LESSONS, self.classroom.students if self.classroom else None)
+            with request_database(self.server.database) as db:
+                custom = {entry["task"]["id"]: entry["task"]["title"] for entry in stored_tasks(db)}
+                data = summary(db, {**ACTIVE_LESSONS, **custom}, self.classroom.students if self.classroom else None)
             if url.path == "/progress.csv":
                 self.send_bytes(200, export_csv(data), "text/csv", attachment="op01-progress.csv")
             else:
@@ -121,16 +153,22 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": "Страница не найдена."})
 
     def do_POST(self):
-        if self.path not in ("/api/terminal", "/api/draft", "/api/check", "/api/document", "/api/login", "/api/logout"):
+        if self.path not in TASK_POSTS and self.path not in ("/api/terminal", "/api/draft", "/api/check", "/api/document", "/api/login", "/api/logout"):
             self.reply(404, {"error": "Страница не найдена."})
+            return
+        if self.path in TASK_POSTS and not self.teacher_allowed():
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 16_384 or self.headers.get_content_type() != "application/json":
+            limit = 65_536 if self.path in TASK_POSTS else 16_384
+            if not 0 < length <= limit or self.headers.get_content_type() != "application/json":
                 raise ValueError
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise ValueError
+            if self.path in TASK_POSTS:
+                self.modify_task(payload)
+                return
             if self.path == "/api/login":
                 self.login(payload)
                 return
@@ -143,22 +181,30 @@ class Handler(BaseHTTPRequestHandler):
             if profile is None:
                 return
             lesson = payload.get("lesson")
-            if not isinstance(lesson, str) or lesson not in LABS:
+            if not isinstance(lesson, str) or len(lesson) > 71:
+                raise ValueError
+            lab = LABS.get(lesson)
+            if lab is None and lesson.startswith("custom-"):
+                with request_database(self.server.database) as db:
+                    entry = load_task(db, lesson)
+                if entry:
+                    lab = task_lab(entry["task"])
+            if lab is None:
                 raise ValueError
             if self.path == "/api/terminal":
                 command = payload.get("command")
                 if not isinstance(command, str) or len(command) > 160:
                     raise ValueError
                 command = " ".join(shlex.split(command))
-                self.terminal(profile, lesson, command)
+                self.terminal(profile, lesson, lab, command)
                 return
             if self.path == "/api/document":
-                if "editor" not in LABS[lesson]:
+                if "editor" not in lab:
                     raise ValueError
                 document = payload.get("text", "")
                 if not isinstance(document, str) or len(document) > 4096 or "\x00" in document:
                     raise ValueError
-                with closing(connect(self.server.database)) as db, db:
+                with request_database(self.server.database, write="text" in payload) as db:
                     if "text" in payload:
                         lock_lesson(db, profile, lesson)
                     state = machine_state(db, profile, lesson)
@@ -168,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply(200, {"text": state.get("document", "")})
                 return
             answers = payload.get("answers")
-            if not isinstance(answers, dict) or not set(answers) <= LABS[lesson]["fields"].keys():
+            if not isinstance(answers, dict) or not set(answers) <= lab["fields"].keys():
                 raise ValueError
             if any(not isinstance(value, str) or len(value) > 150 for value in answers.values()):
                 raise ValueError
@@ -176,10 +222,10 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(400, {"error": "Не удалось обработать запрос."})
             return
         checking = self.path == "/api/check"
-        with closing(connect(self.server.database)) as db, db:
+        with request_database(self.server.database, write=True) as db:
             lock_lesson(db, profile, lesson)
             state = machine_state(db, profile, lesson) if checking else {}
-            results = check_answers(lesson, answers, state) if checking else None
+            results = check_answers(lab, answers, state) if checking else None
             execute(db, """
                 INSERT INTO progress(profile, lesson, answers, results, attempts)
                 VALUES (?, ?, ?, ?, ?)
@@ -191,6 +237,26 @@ class Handler(BaseHTTPRequestHandler):
             attempts = execute(db, "SELECT attempts FROM progress WHERE profile=? AND lesson=?",
                                (profile, lesson)).fetchone()["attempts"]
         self.reply(200, {"results": results, "attempts": attempts})
+
+    def modify_task(self, payload):
+        revision = payload.get("revision", 0)
+        try:
+            if type(revision) is not int or not 0 <= revision < 2_000_000_000:
+                raise ValueError("Неверная версия задания.")
+            task = validate_task(payload.get("task"))
+            if self.path == "/api/tasks/preview":
+                self.reply(200, {"task": task})
+                return
+            with request_database(self.server.database, write=True) as db:
+                entry = save_task(db, task, revision)
+        except TaskConflict as error:
+            self.reply(409, {"error": str(error)})
+        except UnicodeError:
+            self.reply(400, {"error": "В задании есть недопустимые символы."})
+        except ValueError as error:
+            self.reply(400, {"error": str(error)})
+        else:
+            self.reply(200, entry)
 
     def login(self, payload):
         if not self.classroom:
@@ -207,17 +273,17 @@ class Handler(BaseHTTPRequestHandler):
         self.classroom.sign_out(self.token())
         self.reply(200, self.classroom.identity(token), cookie=token)
 
-    def terminal(self, profile, lesson, command):
-        with closing(connect(self.server.database)) as db, db:
+    def terminal(self, profile, lesson, lab, command):
+        with request_database(self.server.database, write=True) as db:
             lock_lesson(db, profile, lesson)
             previous = machine_state(db, profile, lesson)
             current = dict(previous)
-            output = run_command(lesson, command, current)
+            output = run_command(lab, command, current)
             if previous != current:
                 save_machine_state(db, profile, lesson, current)
         result = {"output": output, "started": bool(current)}
-        if "wizard" in LABS[lesson]:
-            result["wizard"] = LABS[lesson]["wizard"](current)
+        if "wizard" in lab:
+            result["wizard"] = lab["wizard"](current)
         self.reply(200, result)
 
 def main():

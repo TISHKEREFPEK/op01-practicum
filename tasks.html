@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор заданий · Практикум ОП01</title>
+<link rel="stylesheet" href="/style.css">
+<header>
+  <strong>Практикум ОП01</strong>
+  <div class="header-actions"><a class="header-link" href="/progress">Сводка преподавателя</a><a class="header-link" href="/">К занятиям</a></div>
+</header>
+<main class="tasks-view">
+  <aside aria-labelledby="saved-title">
+    <h2 id="saved-title">Работы преподавателя</h2>
+    <div class="actions tasks-actions">
+      <button type="button" id="new-task" disabled>Новая работа</button>
+      <button type="button" id="import-task" disabled>Импорт JSON</button>
+      <input type="file" id="task-file" accept=".json,application/json" hidden>
+    </div>
+    <a class="header-link" href="/tasks/example.json" download="example-task.json">Скачать пример задания</a>
+    <p id="tasks-empty">Загружаем работы…</p>
+    <ul id="saved-tasks"></ul>
+  </aside>
+  <section class="task-workspace">
+    <h1>Редактор заданий</h1>
+    <p id="task-status" role="status"></p>
+    <form id="task-form" hidden>
+      <fieldset id="task-fields" class="task-fields">
+        <div class="task-columns">
+          <section aria-labelledby="task-condition">
+            <h2 id="task-condition">Условие</h2>
+            <label>Название<input id="task-title" required maxlength="120"></label>
+            <label>Академические часы<input id="task-hours" type="number" min="1" max="16" required></label>
+            <label>Учебная среда<select id="task-template" required></select></label>
+            <label>Шаги работы<textarea id="task-steps" rows="7" required aria-describedby="steps-tip"></textarea></label>
+            <p id="steps-tip" class="task-hint">Каждый шаг с новой строки.</p>
+          </section>
+          <section aria-labelledby="task-criteria">
+            <h2 id="task-criteria">Самопроверка</h2>
+            <fieldset class="task-checks"><legend>Проверки учебной среды</legend><div id="task-checks"></div></fieldset>
+            <fieldset class="task-checks"><legend>Свои вопросы</legend><div id="task-questions"></div><button type="button" id="add-question">Добавить вопрос</button></fieldset>
+          </section>
+        </div>
+        <div class="actions task-footer">
+          <button type="submit">Сохранить работу</button>
+          <button type="button" id="export-task" hidden>Скачать JSON</button>
+          <button type="button" id="copy-task" hidden>Создать копию</button>
+          <a class="header-link" id="open-task" hidden>Посмотреть работу</a>
+          <p id="task-save-status" class="task-notice" role="status"></p>
+        </div>
+      </fieldset>
+    </form>
+  </section>
+</main>
+<script type="module" src="/tasks.js"></script>
+</html>

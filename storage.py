@@ -1,5 +1,5 @@
 """SQLite and optional PostgreSQL storage for the same lesson data."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 import sqlite3
 
@@ -7,6 +7,10 @@ import sqlite3
 @dataclass(frozen=True)
 class Postgres:
     dsn: str = field(repr=False)
+
+
+class StorageUnavailable(Exception):
+    pass
 
 
 SCHEMA = (
@@ -26,6 +30,13 @@ SCHEMA = (
         lesson TEXT NOT NULL,
         state TEXT NOT NULL,
         PRIMARY KEY (profile, lesson)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS custom_tasks (
+        id TEXT PRIMARY KEY,
+        definition TEXT NOT NULL,
+        revision INTEGER NOT NULL
     )
     """,
 )
@@ -50,6 +61,23 @@ def execute(db, statement, parameters=()):
         # All statements are static. Values are always bound by the driver.
         statement = statement.replace("?", "%s")
     return db.execute(statement, parameters)
+
+
+@contextmanager
+def request_database(database, *, write=False):
+    database_error = sqlite3.OperationalError
+    if isinstance(database, Postgres):
+        from psycopg import OperationalError
+        database_error = OperationalError
+    try:
+        with closing(connect(database)) as db:
+            if write:
+                with db:
+                    yield db
+            else:
+                yield db
+    except database_error as error:
+        raise StorageUnavailable from error
 
 
 def initialize(database):
